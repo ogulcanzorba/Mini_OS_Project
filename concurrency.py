@@ -4,9 +4,16 @@ import random
 import time
 
 class GameThreadManager:
-    def __init__(self, pcb):
+    def __init__(self, pcb, log_callback=None):
         self.pcb = pcb
         self.running = False
+        self.log_callback = log_callback  # Callback for GUI logging
+
+    def log(self, message):
+        if self.log_callback:
+            self.log_callback(message)
+        else:
+            print(message)
 
     def producer(self):
         inputs = ["up", "down", "left", "right"]
@@ -15,7 +22,7 @@ class GameThreadManager:
                 break
             input_key = random.choice(inputs)
             self.pcb.input_queue.put(input_key)
-            print(f"{self.pcb.name} Producer: Added '{input_key}'")
+            self.log(f"{self.pcb.name} Producer: Added '{input_key}'")
             time.sleep(0.5)
 
     def consumer(self):
@@ -26,7 +33,7 @@ class GameThreadManager:
                 input_key = self.pcb.input_queue.get(timeout=0.5)
                 with self.pcb.score_lock:
                     self.pcb.score += 1
-                    print(f"{self.pcb.name} Consumer: Processed '{input_key}', Score: {self.pcb.score}")
+                    self.log(f"{self.pcb.name} Consumer: Processed '{input_key}', Score: {self.pcb.score}")
                 self.pcb.input_queue.task_done()
             except queue.Empty:
                 pass

@@ -1,0 +1,3 @@
+Pong:10
+Tetris:10
+Snake:20

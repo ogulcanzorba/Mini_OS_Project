@@ -21,28 +21,68 @@ class PCB:
         return f"{self.name} (PID: {self.pid}, State: {self.state}, Score: {self.score})"
 
 class Scheduler:
-    def __init__(self, time_quantum, memory_manager, file_system):
+    def __init__(self, time_quantum, memory_manager, file_system, log_callback=None):
         self.ready_queue = []
         self.time_quantum = time_quantum
         self.memory_manager = memory_manager
         self.file_system = file_system
         self.thread_managers = {}
         self.next_pid = 1
+        self.log_callback = log_callback
+
+    def log(self, message):
+        if self.log_callback:
+            self.log_callback(message)
+        else:
+            print(message)
 
     def add_process(self, name, burst_time=6, pages_needed=4):
         pcb = PCB(self.next_pid, name, burst_time, pages_needed)
         self.next_pid += 1
         if self.memory_manager.allocate_memory(pcb):
             self.ready_queue.append(pcb)
-            self.thread_managers[pcb.pid] = GameThreadManager(pcb)
-            print(f"Added {pcb.name} to ready queue")
+            self.thread_managers[pcb.pid] = GameThreadManager(pcb, self.log_callback)
+            self.log(f"Added {pcb.name} to ready queue")
             self.file_system.create_file(f"{pcb.name.lower()}.txt", f"Initial score: {pcb.score}")
         else:
-            print(f"Failed to add {pcb.name} due to insufficient memory")
+            self.log(f"Failed to add {pcb.name} due to insufficient memory")
+
+    def clear_queue(self):
+        for pcb in self.ready_queue[:]:  # Copy to avoid modifying list during iteration
+            self.thread_managers[pcb.pid].stop_threads()
+            self.file_system.delete_file(f"{pcb.name.lower()}.txt")
+            self.memory_manager.deallocate_memory(pcb)
+            del self.thread_managers[pcb.pid]
+        self.ready_queue.clear()
+        self.log("Queue cleared")
+
+    def remove_last_process(self):
+        if not self.ready_queue:
+            return False
+        pcb = max(self.ready_queue, key=lambda x: x.pid)  # Highest PID is last added
+        self.ready_queue.remove(pcb)
+        self.thread_managers[pcb.pid].stop_threads()
+        self.file_system.delete_file(f"{pcb.name.lower()}.txt")
+        self.memory_manager.deallocate_memory(pcb)
+        del self.thread_managers[pcb.pid]
+        self.log(f"Removed last process: {pcb.name}")
+        return True
+
+    def remove_process_by_name(self, name):
+        for pcb in self.ready_queue:
+            if pcb.name == name:
+                self.ready_queue.remove(pcb)
+                self.thread_managers[pcb.pid].stop_threads()
+                self.file_system.delete_file(f"{pcb.name.lower()}.txt")
+                self.memory_manager.deallocate_memory(pcb)
+                del self.thread_managers[pcb.pid]
+                self.log(f"Removed process: {pcb.name}")
+                return True
+        return False
 
     def show_queue(self):
         if not self.ready_queue:
-            print("Ready Queue: Empty")
+            self.log("Ready Queue: Empty")
             return
         queue_str = "Ready Queue: ["
         for pcb in self.ready_queue:
@@ -51,16 +91,16 @@ class Scheduler:
                 queue_str += "]"
             else:
                 queue_str += "|"
-        print(queue_str)
+        self.log(queue_str)
 
     def run(self):
         while self.ready_queue:
             pcb = min(self.ready_queue, key=lambda x: x.total_runtime)
             self.ready_queue.remove(pcb)
             pcb.state = "running"
-            print(f"\nRunning: {pcb}")
+            self.log(f"\nRunning: {pcb}")
             _, msg = self.memory_manager.translate_address(pcb.pid, 1500)
-            print(f"Address Translation: {msg}")
+            self.log(f"Address Translation: {msg}")
             self.thread_managers[pcb.pid].start_threads()
             time.sleep(self.time_quantum)
             self.thread_managers[pcb.pid].stop_threads()
@@ -71,10 +111,10 @@ class Scheduler:
             if pcb.burst_time > 0:
                 pcb.state = "ready"
                 self.ready_queue.append(pcb)
-                print(f"{pcb.name} moved back to ready queue")
+                self.log(f"{pcb.name} moved back to ready queue")
             else:
                 pcb.state = "terminated"
-                print(f"{pcb.name} terminated")
+                self.log(f"{pcb.name} terminated")
                 with pcb.score_lock:
                     self.file_system.save_high_score(pcb.name, pcb.score)
                 self.memory_manager.deallocate_memory(pcb)
